@@ -12,7 +12,20 @@
   $clamp-max: math.max($min-value, $max-value);
 
   font-size: $min-value; // Fallback for older browsers
+  @if $min-value != $max-value {
+    // No clamp() (Chrome < 79, Safari < 13.1): same fluid value via calc(), held at the ends by
+    // the two media queries below.
+    font-size: calc(#{$calc-value});
+  }
   font-size: clamp(#{$clamp-min}, #{$calc-value}, #{$clamp-max});
+  @if $min-value != $max-value {
+    @media (max-width: $min-vw) {
+      font-size: $min-value;
+    }
+    @media (min-width: $max-vw) {
+      font-size: $max-value;
+    }
+  }
 }
 
 $breakpoints: (
@@ -20,14 +33,111 @@ $breakpoints: (
   'large': f.em(1200),
 );
 
+// min-width / max-width instead of range syntax (`width >= x`): the range
+// syntax is invalid in Chrome < 104 / Safari < 16.4, which would drop every rule inside.
 @mixin breakpoint($size) {
-  @media (width >= map.get($breakpoints, $size)) {
+  @media (min-width: map.get($breakpoints, $size)) {
     @content;
   }
 }
 
+// One hundredth of an em under the breakpoint, so the two mixins never overlap.
 @mixin breakpoint-down($size) {
-  @media (width < map.get($breakpoints, $size)) {
+  @media (max-width: map.get($breakpoints, $size) - 0.01em) {
     @content;
+  }
+}
+
+// `gap` on a flex container, with a margin fallback for browsers without
+// flex gap (Chrome < 84, Safari < 14.1, Firefox < 63, IE11). The `no-flex-gap`
+// class on <html> is set by static/js/feature-detect.js; modern browsers use
+// the real `gap` and never see the fallback rules.
+// $direction: the flex-direction the container has at this point (row | column).
+// $reset: true when this call switches an earlier fallback to the other axis.
+@mixin flex-gap($gap, $direction: row, $reset: false) {
+  gap: $gap;
+
+  @if $direction == row {
+    .no-flex-gap & > * + * {
+      margin-left: $gap;
+      @if $reset {
+        margin-top: 0;
+      }
+    }
+  } @else {
+    .no-flex-gap & > * + * {
+      margin-top: $gap;
+      @if $reset {
+        margin-left: 0;
+      }
+    }
+  }
+}
+
+
+// Same as flex-gap(), for containers with `flex-wrap: wrap` where lines also need a
+// vertical gap: half a gap above and below every item, pulled back by the container's
+// negative top/bottom margin so its outer edges stay where the real `gap` puts them.
+// Horizontal spacing is margin-right on every item (fine for start-aligned rows; the
+// container may itself be centred with auto side margins, so those are left alone).
+// Not for containers with their own background/border — the negative margin would
+// shift them; use flex-gap() there. Not for centred or space-filling rows either: the
+// margin-right shifts them; give every item `margin: gap/2` and the container
+// `margin: -gap/2` under .no-flex-gap instead.
+@mixin flex-gap-wrap($gap) {
+  gap: $gap;
+
+  .no-flex-gap & {
+    margin-top: math.div(-$gap, 2);
+    margin-bottom: math.div(-$gap, 2);
+  }
+
+  .no-flex-gap & > * {
+    margin-top: math.div($gap, 2);
+    margin-right: $gap;
+    margin-bottom: math.div($gap, 2);
+  }
+}
+
+// Equal-width grid columns with a flexbox fallback for browsers without CSS grid
+// (Chrome < 57, Safari < 10.1, IE11). Browsers that support grid get the real grid.
+// Only for direct children that are plain boxes with their own background/padding.
+@mixin grid-cols($cols, $gap) {
+  display: flex;
+  flex-wrap: wrap;
+  margin-right: math.div(-$gap, 2);
+  margin-bottom: -$gap;
+  margin-left: math.div(-$gap, 2);
+
+  > * {
+    width: calc(#{math.div(100%, $cols)} - #{$gap});
+    margin: 0 math.div($gap, 2) $gap;
+  }
+
+  @supports (display: grid) {
+    display: grid;
+    grid-template-columns: repeat($cols, 1fr);
+    grid-gap: $gap; // `gap` on grid containers only arrived in Chrome 66 / Safari 12
+    gap: $gap;
+    margin-right: 0;
+    margin-bottom: 0;
+    margin-left: 0;
+
+    > * {
+      width: auto;
+      margin: 0;
+    }
+  }
+}
+
+// `width: min($fluid, $cap)` with a fallback for browsers without min() (Chrome < 79,
+// Safari < 11.1): they keep the fluid width and get the cap as max-width instead.
+// Modern browsers fail the @supports test, so they only ever see the min() line.
+@mixin width-min($fluid, $cap) {
+  width: $fluid;
+  width: min(#{$fluid}, #{$cap});
+
+  @supports not (width: min(1px, 2px)) {
+    max-width: $cap;
   }
 }
